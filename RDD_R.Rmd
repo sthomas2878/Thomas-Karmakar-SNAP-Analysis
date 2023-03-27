@@ -1,0 +1,228 @@
+---
+title: "RDD_R"
+author: "Samuel Thomas"
+output: html_document
+date: "2023-03-26"
+---
+
+## Documentation Links:
+rddtools Documentation: http://qua.st/rddtools/docs/quick-start-guide/
+
+Better rddtools Documentation: https://www.rdocumentation.org/packages/rddtools/versions/1.6.0
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(rddtools)
+library(readr)
+library(ggplot2)
+```
+
+## Uploading Data
+
+```{r}
+# Reading in Data
+dat <- read_csv('faps_clean.csv', show_col_types = F)
+dat <- dat[,-1] # Get Rid of First Column
+
+# Setting Columns as Factors
+dat[c('adltfscat', 'fincondition','region',
+      'rrindicator','targetgroup','mode_racecat_r',
+      'educcat','pr_educcat')] <- lapply(dat[c('adltfscat', 'fincondition',
+                                               'region','rrindicator',
+                                               'targetgroup','mode_racecat_r',
+                                               'educcat','pr_educcat')],
+                                         as.factor)
+str(dat)
+```
+
+## Log transform of Percent Poverty
+
+```{r}
+# Log Transform
+dat <- dat %>% mutate(log_percent_poverty = log(percent_poverty + 1))
+
+# Density Plot of Log Transformed Percent Poverty
+ggplot(dat, aes(x = log_percent_poverty)) +
+  geom_density()
+```
+
+## McCrary Test on Percent Poverty and log(Percent Poverty)
+
+Checks that there is no manipulation around the cutoff - people manipulating their eligibility to be included or                           not included in SNAP
+
+Note: McCrary Test is not dependent on instrument.
+
+```{r}
+# Percent Poverty
+
+  ## Creating RDD Object
+mccrary <- rdd_data(y = dat$binadltfscat, x = dat$percent_poverty,
+                    cutpoint = 150,
+                    covar = c(dat$region, dat$pr_age_r, I(dat$pr_age_r^2),
+                                     dat$ncimmigrant_any, dat$prop_black,
+                                     dat$prop_other, dat$hispanic, dat$pr_educcat, dat$nchildren,
+                                     dat$nadults, dat$pr_sex, dat$disabled, dat$rural))
+
+  ## Conducting Test
+a <- dens_test(mccrary)
+title(main = 'Density Estimations of Percent Poverty for McCrary Test',
+      ylab = 'Density', xlab = 'Percent Poverty')
+
+a # Better plot
+
+# Log(Percent Poverty)
+
+  ## Creating RDD Object
+log_mccrary <- rdd_data(y = dat$binadltfscat, x = dat$log_percent_poverty,
+                        cutpoint = log(150),
+                        covar = c(dat$region, dat$pr_age_r, I(dat$pr_age_r^2),
+                                     dat$ncimmigrant_any, dat$prop_black,
+                                     dat$prop_other, dat$hispanic, dat$pr_educcat, dat$nchildren,
+                                     dat$nadults, dat$pr_sex, dat$disabled, dat$rural))
+
+  ## Conducting Test
+b <- dens_test(log_mccrary)
+title(main = 'Density Estimations of Percent Poverty for McCrary Test',
+      ylab = 'Density', xlab = 'Percent Poverty')
+
+b # Better plot
+```
+
+## Fuzzy RDD on Binary Food Insecurity vs log(Percent Poverty) with SNAP Eligible Instrument
+
+```{r}
+# Plot of Treatment Assignment (SNAP Eligible) vs Log(Percent Poverty)
+ggplot(dat, aes(x = log_percent_poverty, y = elig_units1)) +
+  geom_point() +
+  geom_jitter() +
+  geom_vline(xintercept = log(150), color = 'red') +
+  labs(x = 'Log Percent Poverty', y = 'SNAP Eligible')
+
+
+# Creating rdd data object with binadltfscat as response, log(percent_poverty) as predictor, cutpoint of log(150), and elig_units1 as instrument
+log_fuzzy_rdd_bin <- rdd_data(y = dat$binadltfscat, x = dat$log_percent_poverty,
+                              cutpoint = log(150), z = dat$elig_units1,
+                              covar = c(dat$region, dat$pr_age_r, I(dat$pr_age_r^2),
+                                     dat$ncimmigrant_any, dat$prop_black,
+                                     dat$prop_other, dat$hispanic, dat$pr_educcat, dat$nchildren,
+                                     dat$nadults, dat$pr_sex, dat$disabled, dat$rural))
+summary(log_fuzzy_rdd_bin)
+
+# Plot of rdd
+plot(log_fuzzy_rdd_bin, nbins = 50)
+
+
+# Bandwidth Calculation (Imbens-Kalyanaraman 2012)
+log_bw_ik_fuzzy_bin <- rdd_bw_ik(log_fuzzy_rdd_bin)
+print(log_bw_ik_fuzzy_bin)
+
+
+#Nonparametric Local Linear RDD Regression
+log_nonpara_fuz_bin <- rdd_reg_np(rdd_object = log_fuzzy_rdd_bin, bw = log_bw_ik_fuzzy_bin)
+print(log_nonpara_fuz_bin)
+
+
+#Parametric Probit RDD Regression
+log_para_fuz_bin <- rdd_gen_reg(rdd_object = log_fuzzy_rdd_bin, fun = glm, bw = log_bw_ik_fuzzy_bin,
+                        family = binomial(link = 'probit'),
+                        slope = 'separate', order = 1)
+print(log_para_fuz_bin)
+
+
+# Regression Sensitivity Tests
+  
+  ## LATE vs bw (check sensitivity of estimate to different bandwidths)
+
+      ### Nonparametric Fit
+plotSensi(log_nonpara_fuz_bin, output = 'ggplot') + 
+  xlim(log_bw_ik_fuzzy_bin - 0.1, log_bw_ik_fuzzy_bin + 0.1) +
+  geom_hline(yintercept = 0, color = 'black', linetype = 'dashed') +
+  labs(x = 'Bandwidth', y = 'LATE',
+  title = 'Local Average Treatment Effect (LATE) vs Bandwidth') +
+  theme_bw()
+
+      ### Parametric Fit  
+plotSensi(log_para_fuz_bin, output = 'ggplot') +
+  xlim(log_bw_ik_fuzzy_bin - 0.1, log_bw_ik_fuzzy_bin + 0.1) +
+  geom_hline(yintercept = 0, color = 'black', linetype = 'dashed') +
+  labs(x = 'Bandwidth', y = 'LATE',
+  title = 'Local Average Treatment Effect (LATE) vs Bandwidth') +
+  theme_bw()
+
+  ## Placebo Test (estimate RDD effect based on fake cutpoints)
+
+      ### Nonparametric Fit
+plotPlacebo(log_nonpara_fuz_bin, device = 'ggplot', output = "ggplot")
+
+      ### Parametric Fit
+plotPlacebo(log_para_fuz_bin, output = 'ggplot')
+```
+
+## Fuzzy RDD on Binary Food Insecurity vs log(Percent Poverty) with SNAP Receiver Instrument
+
+```{r}
+# Plot of Treatment Assignment (SNAP Receiver) vs Log(Percent Poverty)
+ggplot(dat, aes(x = log_percent_poverty, y = snapnowhh)) +
+  geom_point() +
+  geom_jitter() +
+  geom_vline(xintercept = log(150), color = 'red')
+
+# Creating rdd data object with binadltfscat as response, log_percent_poverty as predictor, cutpoint of log(150), and snapnowhh as instrument
+log_fuzzy_rdd_bin <- rdd_data(y = dat$binadltfscat, x = dat$log_percent_poverty,
+                              cutpoint = log(150), z = dat$snapnowhh,
+                              covar = c(dat$region, dat$pr_age_r, I(dat$pr_age_r^2),
+                                     dat$ncimmigrant_any, dat$prop_black,
+                                     dat$prop_other, dat$hispanic, dat$pr_educcat, dat$nchildren,
+                                     dat$nadults, dat$pr_sex, dat$disabled, dat$rural))
+summary(log_fuzzy_rdd_bin)
+
+# Plot of rdd
+plot(log_fuzzy_rdd_bin, nbins = 50)
+
+
+# Bandwidth Calculation (Imbens-Kalyanaraman 2012)
+log_bw_ik_fuzzy_bin <- rdd_bw_ik(log_fuzzy_rdd_bin)
+print(log_bw_ik_fuzzy_bin)
+
+
+#Nonparametric Local Linear RDD Regression
+log_nonpara_fuz_bin <- rdd_reg_np(rdd_object = log_fuzzy_rdd_bin, bw = log_bw_ik_fuzzy_bin)
+print(log_nonpara_fuz_bin)
+
+
+#Parametric Probit RDD Regression
+log_para_fuz_bin <- rdd_gen_reg(rdd_object = log_fuzzy_rdd_bin, fun = glm, bw = log_bw_ik_fuzzy_bin,
+                        family = binomial(link = 'probit'),
+                        slope = 'separate', order = 1)
+print(log_para_fuz_bin)
+
+
+# Regression Sensitivity Tests
+
+  ## LATE vs bw (check sensitivity of estimate to different bandwidths)
+
+    ### Nonparametric Fit
+plotSensi(log_nonpara_fuz_bin, output = 'ggplot') +
+  xlim(log_bw_ik_fuzzy_bin - 0.1, log_bw_ik_fuzzy_bin + 0.1) +
+  geom_hline(yintercept = 0, color = 'black', linetype = 'dashed') +
+  labs(x = 'Bandwidth', y = 'LATE',
+  title = 'Local Average Treatment Effect (LATE) vs Bandwidth') +
+  theme_bw()
+
+    ### Parametric Fit
+plotSensi(log_para_fuz_bin, output = 'ggplot') +
+  xlim(log_bw_ik_fuzzy_bin - 0.1, log_bw_ik_fuzzy_bin + 0.1) +
+  geom_hline(yintercept = 0, color = 'black', linetype = 'dashed') +
+  labs(x = 'Bandwidth', y = 'LATE',
+  title = 'Local Average Treatment Effect (LATE) vs Bandwidth') +
+  theme_bw()
+
+  ## Placebo Test (estimate RDD effect based on fake cutpoints)
+
+    ### Nonparametric Fit
+plotPlacebo(log_nonpara_fuz_bin)
+
+    ### Parametric Fit
+plotPlacebo(log_para_fuz_bin)
+```

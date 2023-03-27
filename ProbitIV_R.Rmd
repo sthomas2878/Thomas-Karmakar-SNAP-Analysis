@@ -1,0 +1,89 @@
+---
+title: "ProbitIV_R"
+author: "Samuel Thomas"
+output: html_document
+date: "2023-03-26"
+---
+
+## Documentation Link
+
+ivtools Documentation: https://cran.r-project.org/web/packages/ivtools/ivtools.pdf
+
+## Imports
+
+```{r setup, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readr)
+library(ggplot2)
+library(ivtools)
+```
+
+## Uploading Data
+
+```{r}
+# Reading in Data
+dat <- read_csv('faps_clean.csv', show_col_types = F)
+dat <- dat[,-1] # Get Rid of First Column
+
+# Setting Columns as Factors
+dat[c('adltfscat', 'fincondition','region',
+      'rrindicator','targetgroup','mode_racecat_r',
+      'educcat','pr_educcat')] <- lapply(dat[c('adltfscat', 'fincondition',
+                                               'region','rrindicator',
+                                               'targetgroup','mode_racecat_r',
+                                               'educcat','pr_educcat')],
+                                         as.factor)
+
+# Dividing Income by 1000
+dat$inchhavg_r <- dat$inchhavg_r / 1000
+
+# Filtering for data <= 150 percent_poverty
+dat <- dat %>% filter(percent_poverty <= 150)
+
+str(dat)
+```
+
+## Naive Probit
+
+```{r}
+fit_naive <- glm(binadltfscat ~ pr_age_r + I(pr_age_r^2) + ncimmigrant_any + prop_black + prop_other +
+                 hispanic +pr_educcat + nchildren + nadults + pr_sex + disabled + rural +
+                 inchhavg_r +
+                 snapnowhh,
+               data = dat,
+               family = binomial(link = 'probit'))
+
+summary(fit_naive)
+```
+
+## Probit IV
+
+* Note: ivtools simply replaces the X in fitY_LX with X-hat from fitX_LZ, then recalculates standard errors, confidence intervals, etc.
+
+```{r}
+# Fitting the first stage
+fitX_LZ <- glm(snapnowhh ~ region + pr_age_r + I(pr_age_r^2) + ncimmigrant_any + prop_black + prop_other +
+                 hispanic + pr_educcat + nchildren + nadults + pr_sex + disabled + rural +
+                 inchhavg_r,
+               data = dat,
+               family = binomial(link = 'probit'))
+
+summary(fitX_LZ)
+
+# Fitting the second stage
+fitY_LX <- glm(binadltfscat ~ pr_age_r + I(pr_age_r^2) + ncimmigrant_any + prop_black + prop_other +
+                 hispanic +pr_educcat + nchildren + nadults + pr_sex + disabled + rural +
+                 inchhavg_r +
+                 snapnowhh,
+               data = dat,
+               family = binomial(link = 'probit'))
+
+# This is the same as the 'Naive probit'
+# summary(fitY_LX)
+
+# Conducts proper IV analysis, see note
+iv_fit <- ivglm(estmethod = 'ts', data = dat, fitY.LX = fitY_LX, fitX.LZ = fitX_LZ, ctrl = F)
+
+summary(iv_fit)
+```
