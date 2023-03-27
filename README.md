@@ -34,3 +34,15 @@ This repository contains all of the data and code used in the paper "Understandi
 ### Exploratory Data Analysis Notebook:
 
 11. eda.ipynb - Python notebook containing code and output of exploratory data analysis section in Final Paper.docx.
+
+### Data
+
+12. faps_clean.csv - Output of data_merge.ipynb containing fully cleaned individual and household data used in Modeling Notebooks and Exploratory Data Analysis Notebook.
+
+13. faps_household_clean.csv - Output of data_cleaning.ipynb containing clean household data.
+
+14. faps_household_puf.csv - Original FoodAPS household dataset. Documentation for this dataset is 1_Household Codebook PUF.pdf.
+
+15. faps_individual_clean.csv - Output of data_cleaning_Indiv.ipynb containing clean individual data.
+
+16. faps_individual_puf.csv - Original FoodAPS individual dataset. Documentation for this dataset is 2_Individual Codebook PUF.pdf.
